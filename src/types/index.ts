@@ -1,20 +1,26 @@
 export type Role = "ADMIN" | "ANALYST" | "VIEWER";
-export type Sector = "HEALTH" | "EDUCATION" | "WATER" | "INFRASTRUCTURE";
 export type AllocationStatus = "UNDER" | "OVER" | "OPTIMAL";
-export type ReportType = "DISTRICT" | "NATIONAL" | "SECTOR";
+export type SummaryType = "DISTRICT" | "STATE";
+export type UserStatus = "Active" | "Inactive";
+export type UtilizationStatus = "Poor" | "Moderate" | "Good";
+export type NeedLevel = "Low" | "Medium" | "High";
+export type RegionType = "Urban" | "Rural" | "Tribal";
 
 export interface User {
   id: string;
   name: string;
   email: string;
+  password: string;
   role: Role;
+  status: UserStatus;
+  createdAt: string;
 }
 
 export interface District {
   id: string;
   name: string;
   state: string;
-  region: string;
+  region: RegionType;
   population: number;
   area_km2: number;
   literacy_rate: number;
@@ -28,7 +34,6 @@ export interface District {
 export interface AllocationRecord {
   id: string;
   districtId: string;
-  sector: Sector;
   year: number;
   quarter: number;
   allocated_amount: number;
@@ -42,16 +47,15 @@ export interface NeedIndex {
   year: number;
   quarter: number;
   need_index_score: number;
-  population_weight: number;
-  complaint_weight: number;
-  poverty_weight: number;
-  infra_weight: number;
+  population_contribution: number;
+  complaint_contribution: number;
+  poverty_contribution: number;
+  infra_contribution: number;
 }
 
 export interface PredictionResult {
   id: string;
   districtId: string;
-  sector: Sector;
   year: number;
   quarter: number;
   predicted_need: number;
@@ -59,6 +63,7 @@ export interface PredictionResult {
   aes_score: number;
   allocation_status: AllocationStatus;
   confidence_score: number;
+  gap: number;
 }
 
 export interface RedistributionPlan {
@@ -67,7 +72,6 @@ export interface RedistributionPlan {
   total_budget: number;
   year: number;
   quarter: number;
-  sector: Sector;
   plan: RedistributionEntry[];
   generated_at: string;
 }
@@ -79,25 +83,21 @@ export interface RedistributionEntry {
   recommended_allocation: number;
   delta_amount: number;
   delta_percent: number;
-  status: AllocationStatus;
+  status: "INCREASE" | "DECREASE" | "SAME";
 }
 
 export interface ExecutiveSummary {
   id: string;
   districtId: string | null;
   district_name?: string;
-  summary_text: string;
+  summary_type: SummaryType;
+  year: number;
+  quarter: number;
+  problem_text: string;
+  analysis_text: string;
+  recommendation_text: string;
   generated_by: string;
-  report_type: ReportType;
   createdAt: string;
-}
-
-export interface DashboardKPIs {
-  totalDistricts: number;
-  underAllocatedPct: number;
-  overAllocatedPct: number;
-  totalWastage: number;
-  avgAES: number;
 }
 
 export interface NeedIndexWeights {
@@ -105,4 +105,39 @@ export interface NeedIndexWeights {
   w2: number;
   w3: number;
   w4: number;
+}
+
+export interface AESThresholds {
+  under: number;
+  over: number;
+}
+
+export interface SystemSettings {
+  weights: NeedIndexWeights;
+  thresholds: AESThresholds;
+  primaryModel: string;
+  fallbackModel: string;
+  modelStatus: "connected" | "unreachable";
+}
+
+export interface DataUploadLog {
+  id: string;
+  fileName: string;
+  uploadType: "districts" | "allocations";
+  rowCount: number;
+  status: "PROCESSING" | "SUCCESS" | "FAILED";
+  error?: string;
+  uploadedBy: string;
+  createdAt: string;
+}
+
+export interface DashboardKPIs {
+  totalDistricts: number;
+  underCount: number;
+  overCount: number;
+  optimalCount: number;
+  underPct: number;
+  overPct: number;
+  optimalPct: number;
+  avgAES: number;
 }

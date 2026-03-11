@@ -1,129 +1,218 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { KPICard, PageHeader, formatCrores } from "@/components/shared/DataWidgets";
-import { IndiaMap } from "@/components/maps/IndiaMap";
-import { getDashboardKPIs, getTopDistricts, getAESTrend, getSectorSummary } from "@/data/mockData";
+import { KPICard, PageHeader, SectionCard, formatCrores, StatusBadge } from "@/components/shared/DataWidgets";
+import { GujaratMap } from "@/components/maps/IndiaMap";
+import { getDashboardKPIs, getTopDistricts, getAESTrend, refreshPredictions, lastPredictionDate, generateStateSummary, predictions, exportToCSV, getDistrictName } from "@/data/mockData";
+import { useAppStore } from "@/store/appStore";
+import { Button } from "@/components/ui/button";
+import { Brain, FileText, Download, Loader2, AlertTriangle, BarChart3, TrendingDown, TrendingUp, Activity, MapPin, Clock } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
-const COLORS = { under: "#ef4444", over: "#3b82f6", optimal: "#16a34a" };
+const COLORS = { under: "#ef4444", over: "#3b82f6", optimal: "#22c55e" };
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const canCompute = useAppStore(s => s.canCompute());
+  const [runningPredictions, setRunningPredictions] = useState(false);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [, setRefresh] = useState(0);
+
   const kpis = getDashboardKPIs();
-  const topUnder = getTopDistricts("under", 8);
-  const topOver = getTopDistricts("over", 8);
+  const topUnder = getTopDistricts("under", 5);
+  const topOver = getTopDistricts("over", 5);
   const aesTrend = getAESTrend();
-  const sectorData = getSectorSummary();
 
   const pieData = [
-    { name: "Under-Allocated", value: kpis.underAllocatedPct, color: COLORS.under },
-    { name: "Over-Allocated", value: kpis.overAllocatedPct, color: COLORS.over },
-    { name: "Optimal", value: 100 - kpis.underAllocatedPct - kpis.overAllocatedPct, color: COLORS.optimal },
+    { name: "Under-Allocated", value: kpis.underCount, color: COLORS.under },
+    { name: "Over-Allocated", value: kpis.overCount, color: COLORS.over },
+    { name: "Optimal", value: kpis.optimalCount, color: COLORS.optimal },
   ];
+
+  const daysSincePrediction = Math.floor((Date.now() - new Date(lastPredictionDate).getTime()) / 86400000);
+  const isStale = daysSincePrediction > 30;
+
+  const handleRunPredictions = () => {
+    setRunningPredictions(true);
+    setTimeout(() => {
+      refreshPredictions();
+      setRunningPredictions(false);
+      setRefresh(r => r + 1);
+      toast({ title: "Predictions Complete", description: "Bedrock has generated predictions for all 12 Gujarat districts." });
+    }, 2500);
+  };
+
+  const handleGenerateSummary = () => {
+    setGeneratingSummary(true);
+    setTimeout(() => {
+      generateStateSummary();
+      setGeneratingSummary(false);
+      toast({ title: "Summary Generated", description: "Gujarat State Health policy brief has been created." });
+      navigate("/summaries");
+    }, 2000);
+  };
+
+  const handleExportCSV = () => {
+    const data = predictions.map(p => ({
+      District: getDistrictName(p.districtId),
+      NI_Score: p.predicted_need,
+      Current_Allocation: p.current_allocation,
+      Predicted_Need: p.predicted_need,
+      AES_Score: p.aes_score,
+      Status: p.allocation_status,
+      Gap: p.gap,
+      Confidence: p.confidence_score,
+    }));
+    exportToCSV(data, "disha_predictions.csv");
+    toast({ title: "CSV Exported", description: "Prediction data downloaded as CSV file." });
+  };
 
   return (
     <AppLayout>
-      <PageHeader title="Executive Dashboard" subtitle="National Resource Allocation Intelligence — Q1 2025" />
+      <PageHeader
+        title="DISHA — National Health Dashboard"
+        subtitle="National Health Resource Allocation Intelligence — Prototype: Gujarat Health Sector, Q1 2025"
+      >
+        <div className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg" style={{ background: "#fff", border: "1px solid #e2e8f0", color: "#64748b" }}>
+          <Clock className="w-3.5 h-3.5" />
+          Updated: {new Date(lastPredictionDate).toLocaleDateString("en-IN")}
+        </div>
+      </PageHeader>
+
+      {/* Stale warning */}
+      {isStale && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl mb-5 text-sm border" style={{ background: "#fffbeb", borderColor: "#fde68a", color: "#92400e" }}>
+          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
+          <span>Predictions may be outdated ({daysSincePrediction} days old). Consider running fresh predictions.</span>
+        </div>
+      )}
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
-        <KPICard title="Districts Analyzed" value={kpis.totalDistricts} variant="default" />
-        <KPICard title="Under-Allocated" value={`${kpis.underAllocatedPct}%`} variant="danger" subtitle="Districts below optimal" />
-        <KPICard title="Over-Allocated" value={`${kpis.overAllocatedPct}%`} variant="info" subtitle="Districts above optimal" />
-        <KPICard title="Budget Inefficiency" value={formatCrores(kpis.totalWastage)} variant="warning" subtitle="Total detected wastage" />
-        <KPICard title="Avg AES Score" value={kpis.avgAES} variant="success" subtitle="National average" />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-5">
+        <KPICard title="Districts Analyzed" value={kpis.totalDistricts} subtitle="Gujarat state"
+          variant="default" icon={<MapPin className="w-4 h-4" />} />
+        <KPICard title="Under-Allocated" value={`${kpis.underCount} Districts`}
+          variant="danger" subtitle={`${kpis.underPct}% of total`} icon={<TrendingDown className="w-4 h-4" />} />
+        <KPICard title="Over-Allocated" value={`${kpis.overCount} Districts`}
+          variant="info" subtitle={`${kpis.overPct}% of total`} icon={<TrendingUp className="w-4 h-4" />} />
+        <KPICard title="Optimal Allocation" value={`${kpis.optimalCount} Districts`}
+          variant="success" subtitle={`${kpis.optimalPct}% of total`} icon={<Activity className="w-4 h-4" />} />
+        <KPICard title="Avg AES Score" value={kpis.avgAES.toFixed(2)}
+          variant={kpis.avgAES < 0.95 ? "danger" : kpis.avgAES > 1.05 ? "info" : "success"}
+          subtitle="1.0 = Perfect" icon={<BarChart3 className="w-4 h-4" />} />
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        {/* Top Under-Allocated */}
-        <div className="bg-card rounded-lg border p-5">
-          <h3 className="text-sm font-semibold mb-4">Top Under-Allocated Districts</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={topUnder} layout="vertical" margin={{ left: 60 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,15%,90%)" />
-              <XAxis type="number" tick={{ fontSize: 11 }} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={55} />
-              <Tooltip formatter={(v: number) => formatCrores(v)} />
+      {/* Charts Row — Top Under & Over */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <SectionCard title="Top Under-Allocated Districts" subtitle="Budget gap in ₹ Crore">
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={topUnder} layout="vertical" margin={{ left: 70 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} width={65} />
+              <Tooltip formatter={(v: number) => formatCrores(v)} contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
               <Bar dataKey="gap" fill={COLORS.under} radius={[0, 4, 4, 0]} name="Gap (₹ Cr)" />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </SectionCard>
 
-        {/* Top Over-Allocated */}
-        <div className="bg-card rounded-lg border p-5">
-          <h3 className="text-sm font-semibold mb-4">Top Over-Allocated Districts</h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={topOver} layout="vertical" margin={{ left: 60 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,15%,90%)" />
-              <XAxis type="number" tick={{ fontSize: 11 }} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={55} />
-              <Tooltip formatter={(v: number) => formatCrores(v)} />
+        <SectionCard title="Top Over-Allocated Districts" subtitle="Excess budget in ₹ Crore">
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={topOver} layout="vertical" margin={{ left: 70 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} width={65} />
+              <Tooltip formatter={(v: number) => formatCrores(v)} contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
               <Bar dataKey="gap" fill={COLORS.over} radius={[0, 4, 4, 0]} name="Gap (₹ Cr)" />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </SectionCard>
       </div>
 
-      {/* Trend + Pie */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="lg:col-span-2 bg-card rounded-lg border p-5">
-          <h3 className="text-sm font-semibold mb-4">AES Trend (National Average)</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={aesTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,15%,90%)" />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis domain={[0.7, 1.3]} tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Line type="monotone" dataKey="aes" stroke="hsl(220,60%,22%)" strokeWidth={2} dot={{ r: 4 }} name="AES Score" />
-            </LineChart>
-          </ResponsiveContainer>
+      {/* Trend + Donut */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        <div className="lg:col-span-2">
+          <SectionCard title="AES Trend" subtitle="Gujarat Health Average — Allocation Efficiency Score">
+            <ResponsiveContainer width="100%" height={210}>
+              <LineChart data={aesTrend}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                <YAxis domain={[0.7, 1.3]} tick={{ fontSize: 11, fill: "#94a3b8" }} />
+                <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
+                <ReferenceLine y={1.0} stroke="#22c55e" strokeDasharray="5 5"
+                  label={{ value: "Optimal (1.0)", position: "right", fill: "#16a34a", fontSize: 10 }} />
+                <Line type="monotone" dataKey="aes" stroke="#1e3a5f" strokeWidth={2.5} dot={{ r: 4, fill: "#1e3a5f" }} name="AES Score" />
+              </LineChart>
+            </ResponsiveContainer>
+          </SectionCard>
         </div>
 
-        <div className="bg-card rounded-lg border p-5">
-          <h3 className="text-sm font-semibold mb-4">Allocation Distribution</h3>
-          <ResponsiveContainer width="100%" height={220}>
+        <SectionCard title="Status Distribution" subtitle="All 12 districts">
+          <ResponsiveContainer width="100%" height={210}>
             <PieChart>
-              <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" label={({ name, value }) => `${name}: ${value}%`} labelLine={false}>
-                {pieData.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} />
-                ))}
+              <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={82} dataKey="value">
+                {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
               </Pie>
-              <Tooltip />
+              <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
             </PieChart>
           </ResponsiveContainer>
-        </div>
+          <div className="flex flex-col gap-1.5 mt-2">
+            {pieData.map(d => (
+              <div key={d.name} className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5" style={{ color: "#64748b" }}>
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: d.color }} />
+                  {d.name}
+                </span>
+                <span className="font-semibold" style={{ color: "#1e293b" }}>{d.value}</span>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
       </div>
 
-      {/* Map */}
-      <div className="bg-card rounded-lg border p-5 mb-6">
-        <h3 className="text-sm font-semibold mb-4">District Allocation Heatmap</h3>
+      {/* Gujarat District Map */}
+      <SectionCard title="Gujarat District Health Map" subtitle="AES status color-coded by district" className="mb-4">
         <div className="flex gap-4 mb-3 text-xs">
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-destructive inline-block" /> Under-Allocated</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-success inline-block" /> Optimal</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-full bg-info inline-block" /> Over-Allocated</span>
+          {[
+            { color: "#ef4444", label: "Under-Allocated" },
+            { color: "#22c55e", label: "Optimal" },
+            { color: "#3b82f6", label: "Over-Allocated" },
+          ].map(l => (
+            <span key={l.label} className="flex items-center gap-1.5" style={{ color: "#64748b" }}>
+              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: l.color }} />
+              {l.label}
+            </span>
+          ))}
         </div>
-        <IndiaMap onDistrictClick={(id) => navigate(`/districts/${id}`)} />
-      </div>
+        <GujaratMap />
+      </SectionCard>
 
-      {/* Sector Summary */}
-      <div className="bg-card rounded-lg border p-5">
-        <h3 className="text-sm font-semibold mb-4">Sector-wise Allocation vs Need</h3>
-        <ResponsiveContainer width="100%" height={250}>
-          <BarChart data={sectorData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,15%,90%)" />
-            <XAxis dataKey="sector" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} />
-            <Tooltip formatter={(v: number) => `₹${v} Cr`} />
-            <Legend />
-            <Bar dataKey="allocated" fill="hsl(220,60%,22%)" name="Allocated (₹ Cr)" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="needed" fill="hsl(35,90%,52%)" name="Predicted Need (₹ Cr)" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      {/* Quick Actions */}
+      <SectionCard title="Quick Actions" subtitle="Trigger AI operations and data exports">
+        <div className="flex flex-wrap gap-3">
+          {canCompute && (
+            <>
+              <Button onClick={handleRunPredictions} disabled={runningPredictions}
+                className="font-medium" style={{ background: "linear-gradient(135deg, #1e3a5f, #2d5a8e)" }}>
+                {runningPredictions ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Brain className="w-4 h-4 mr-2" />}
+                {runningPredictions ? "Running via Bedrock..." : "Run Health Predictions"}
+              </Button>
+              <Button variant="outline" onClick={handleGenerateSummary} disabled={generatingSummary} className="font-medium" style={{ borderColor: "#cbd5e1" }}>
+                {generatingSummary ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileText className="w-4 h-4 mr-2" />}
+                {generatingSummary ? "Generating..." : "Generate State Summary"}
+              </Button>
+            </>
+          )}
+          <Button variant="outline" onClick={handleExportCSV} className="font-medium" style={{ borderColor: "#cbd5e1" }}>
+            <Download className="w-4 h-4 mr-2" /> Export CSV
+          </Button>
+        </div>
+      </SectionCard>
     </AppLayout>
   );
 }
